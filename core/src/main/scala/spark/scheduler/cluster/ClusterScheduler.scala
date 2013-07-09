@@ -95,7 +95,8 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
 
   override def submitTasks(taskSet: TaskSet) {
     val tasks = taskSet.tasks
-    logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
+    logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks at " +
+            System.nanoTime())
     this.synchronized {
       val manager = new TaskSetManager(this, taskSet)
       activeTaskSets(taskSet.id) = manager
@@ -135,6 +136,7 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
    * that tasks are balanced across the cluster.
    */
   def resourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = {
+    logInfo("Resource offers received at " + System.nanoTime()) 
     synchronized {
       SparkEnv.set(sc.env)
       // Mark each slave as alive and remember its hostname
@@ -174,11 +176,13 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
       if (tasks.size > 0) {
         hasLaunchedTask = true
       }
+      logInfo("Done processing resource offers at " + System.nanoTime())
       return tasks
     }
   }
 
   def statusUpdate(tid: Long, state: TaskState, serializedData: ByteBuffer) {
+    logInfo("Status update received at " + System.nanoTime())
     var taskSetToUpdate: Option[TaskSetManager] = None
     var failedExecutor: Option[String] = None
     var taskFailed = false
@@ -226,6 +230,7 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
       // Also revive offers if a task had failed for some reason other than host lost
       backend.reviveOffers()
     }
+    logInfo("Status update done at " + System.nanoTime())
   }
 
   def error(message: String) {

@@ -443,7 +443,8 @@ class DAGScheduler(
       }
     }
     if (tasks.size > 0) {
-      logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd + ")")
+      logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd +
+              ") at " + System.nanoTime())
       myPending ++= tasks
       logDebug("New pending tasks: " + myPending)
       taskSched.submitTasks(
