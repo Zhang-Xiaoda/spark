@@ -55,11 +55,16 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
+        logInfo("Begin SU at " + System.nanoTime())
         scheduler.statusUpdate(taskId, state, data.value)
+        logInfo("Scheduler SU done at " + System.nanoTime())
         if (TaskState.isFinished(state)) {
+          logInfo("Starting make offers at " + System.nanoTime())
           freeCores(executorId) += 1
           makeOffers(executorId)
+          logInfo("Done making offers at " + System.nanoTime())
         }
+        logInfo("End SU at " + System.nanoTime())
 
       case ReviveOffers =>
         makeOffers()
@@ -84,22 +89,30 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
 
     // Make fake resource offers on all executors
     def makeOffers() {
-      launchTasks(scheduler.resourceOffers(
-        executorHost.toArray.map {case (id, host) => new WorkerOffer(id, host, freeCores(id))}))
+      logInfo(Thread.currentThread.getName() + ": Scheduler backend making resource offers to ClusterScheduler at " + System.nanoTime())
+      val tasks = scheduler.resourceOffers(
+        executorHost.toArray.map {case (id, host) => new WorkerOffer(id, host, freeCores(id))})
+      logInfo(Thread.currentThread.getName() + "Done making offers to CS at " + System.nanoTime())
+      launchTasks(tasks)
     }
 
     // Make fake resource offers on just one executor
     def makeOffers(executorId: String) {
-      launchTasks(scheduler.resourceOffers(
-        Seq(new WorkerOffer(executorId, executorHost(executorId), freeCores(executorId)))))
+      logInfo(Thread.currentThread.getName() + ": Scheduler backend making resource offers to ClusterScheduler at " + System.nanoTime())
+      val tasks = scheduler.resourceOffers(
+        Seq(new WorkerOffer(executorId, executorHost(executorId), freeCores(executorId))))
+      logInfo(Thread.currentThread.getName() + "Done making offers to CS at " + System.nanoTime())
+      launchTasks(tasks)
     }
 
     // Launch tasks returned by a set of resource offers
     def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
+      logInfo(Thread.currentThread.getName() + ": Launching tasks as a result of offers at " + System.nanoTime())
       for (task <- tasks.flatten) {
         freeCores(task.executorId) -= 1
         executorActor(task.executorId) ! LaunchTask(task)
       }
+      logInfo(Thread.currentThread.getName() + ":Done launching tasks at " + System.nanoTime())
     }
 
     // Remove a disconnected slave from the cluster

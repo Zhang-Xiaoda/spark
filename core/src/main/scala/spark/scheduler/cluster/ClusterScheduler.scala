@@ -136,8 +136,11 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
    * that tasks are balanced across the cluster.
    */
   def resourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = {
-    logInfo("Resource offers received at " + System.nanoTime()) 
+    logInfo(Thread.currentThread.getName() + ": Resource offers received at " +
+            System.nanoTime()) 
     synchronized {
+      logInfo(Thread.currentThread.getName() + ": started sync block at " +
+              System.nanoTime())
       SparkEnv.set(sc.env)
       // Mark each slave as alive and remember its hostname
       for (o <- offers) {
@@ -176,17 +179,19 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
       if (tasks.size > 0) {
         hasLaunchedTask = true
       }
-      logInfo("Done processing resource offers at " + System.nanoTime())
+      logInfo(Thread.currentThread.getName() +
+              ": Done processing resource offers at " + System.nanoTime())
       return tasks
     }
   }
 
   def statusUpdate(tid: Long, state: TaskState, serializedData: ByteBuffer) {
-    logInfo("Status update received at " + System.nanoTime())
+    logInfo(Thread.currentThread.getName() + ": Status update received at " + System.nanoTime())
     var taskSetToUpdate: Option[TaskSetManager] = None
     var failedExecutor: Option[String] = None
     var taskFailed = false
     synchronized {
+      logInfo("Status update got lock at " + System.nanoTime())
       try {
         if (state == TaskState.LOST && taskIdToExecutorId.contains(tid)) {
           // We lost this entire executor, so remember that it's gone
@@ -230,7 +235,7 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
       // Also revive offers if a task had failed for some reason other than host lost
       backend.reviveOffers()
     }
-    logInfo("Status update done at " + System.nanoTime())
+    logInfo(Thread.currentThread.getName() + ": Status update done at " + System.nanoTime())
   }
 
   def error(message: String) {

@@ -443,8 +443,9 @@ class DAGScheduler(
       }
     }
     if (tasks.size > 0) {
-      logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd +
-              ") at " + System.nanoTime())
+      logInfo(Thread.currentThread.getName() + ": Submitting " + tasks.size +
+              " missing tasks from " + stage + " (" + stage.rdd + ") at " +
+              System.nanoTime())
       myPending ++= tasks
       logDebug("New pending tasks: " + myPending)
       taskSched.submitTasks(
@@ -464,6 +465,8 @@ class DAGScheduler(
    * modify the scheduler's internal state. Use taskEnded() to post a task end event from outside.
    */
   private def handleTaskCompletion(event: CompletionEvent) {
+    logInfo(Thread.currentThread.getName() +
+            ": Handle task completed started at " + System.nanoTime())
     val task = event.task
     val stage = idToStage(task.stageId)
 
@@ -588,6 +591,8 @@ class DAGScheduler(
         // Non-fetch failure -- probably a bug in user code; abort all jobs depending on this stage
         abortStage(idToStage(task.stageId), task + " failed: " + other)
     }
+    logInfo(Thread.currentThread.getName() +
+            ": Handle task completed completed at " + System.nanoTime());
   }
 
   /**
