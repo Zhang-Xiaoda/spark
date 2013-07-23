@@ -60,3 +60,5 @@ private[spark] case object StopDriver extends StandaloneClusterMessage
 
 private[spark] case class RemoveExecutor(executorId: String, reason: String)
   extends StandaloneClusterMessage
+
+private[spark] case class MakeOffers() extends StandaloneClusterMessage
