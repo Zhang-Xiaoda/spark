@@ -23,6 +23,8 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
 
+import akka.actor._
+
 import spark._
 import spark.TaskState.TaskState
 import spark.scheduler._
@@ -34,7 +36,7 @@ import java.util.{TimerTask, Timer}
  * The main TaskScheduler implementation, for running tasks on a cluster. Clients should first call
  * start(), then submit task sets through the runTasks method.
  */
-private[spark] class ClusterScheduler(val sc: SparkContext)
+private[spark] class ClusterScheduler(val sc: SparkContext, val actorSystem: ActorSystem)
   extends TaskScheduler
   with Logging {
 
@@ -115,6 +117,19 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
   var schedulableBuilder: SchedulableBuilder = null
   var rootPool: Pool = null
 
+  var schedulerActor: ActorRef = null
+
+  class SchedulerActor() extends Actor {
+    def receive = {
+      case ResourceOffers(offers) =>
+        val tasks : Seq[Seq[TaskDescription]] = resourceOffers(offers)
+        sender ! LaunchTasks(tasks)
+
+      case CSStatusUpdate(tid, state, serializedData) =>
+        statusUpdate(tid, state, serializedData)
+    }
+  }
+
   override def setListener(listener: TaskSchedulerListener) {
     this.listener = listener
   }
@@ -188,6 +203,9 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
         }
       }.start()
     }
+
+    schedulerActor = actorSystem.actorOf(
+      Props(new SchedulerActor()), name = "SchedulerActor")
   }
 
   override def submitTasks(taskSet: TaskSet) {

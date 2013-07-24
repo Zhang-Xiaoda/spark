@@ -168,7 +168,7 @@ class SparkContext(
         new LocalScheduler(threads.toInt, maxFailures.toInt, this)
 
       case SPARK_REGEX(sparkUrl) =>
-        val scheduler = new ClusterScheduler(this)
+        val scheduler = new ClusterScheduler(this, this.env.actorSystem)
         val backend = new SparkDeploySchedulerBackend(scheduler, this, sparkUrl, appName)
         scheduler.initialize(backend)
         scheduler
@@ -182,7 +182,7 @@ class SparkContext(
               memoryPerSlaveInt, SparkContext.executorMemoryRequested))
         }
 
-        val scheduler = new ClusterScheduler(this)
+        val scheduler = new ClusterScheduler(this, this.env.actorSystem)
         val localCluster = new LocalSparkCluster(
           numSlaves.toInt, coresPerSlave.toInt, memoryPerSlaveInt)
         val sparkUrl = localCluster.start()
@@ -214,7 +214,7 @@ class SparkContext(
           logWarning("Master %s does not match expected format, parsing as Mesos URL".format(master))
         }
         MesosNativeLibrary.load()
-        val scheduler = new ClusterScheduler(this)
+        val scheduler = new ClusterScheduler(this, this.env.actorSystem)
         val coarseGrained = System.getProperty("spark.mesos.coarse", "false").toBoolean
         val masterWithoutProtocol = master.replaceFirst("^mesos://", "")  // Strip initial mesos://
         val backend = if (coarseGrained) {

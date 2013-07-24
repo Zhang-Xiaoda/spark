@@ -51,6 +51,8 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
 
     // True if there is currently an outstanding TODO 
     private var outstandingResourceOffersMessage = false
+    // True if we should make a new offer
+    private var somethingNew = false
 
     override def preStart() {
       // Listen for remote client disconnection events, since they don't go through Akka's watch()
@@ -73,17 +75,20 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
           actorToExecutorId(sender) = executorId
           addressToExecutorId(sender.path.address) = executorId
           totalCoreCount.addAndGet(cores)
+          somethingNew = true
           makeOffersIfNoneOutstanding()
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
-        scheduler.statusUpdate(taskId, state, data.value)
+        scheduler.schedulerActor ! CSStatusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state)) {
           freeCores(executorId) += 1
+          somethingNew = true
           makeOffersIfNoneOutstanding()
         }
 
       case ReviveOffers =>
+        somethingNew = true
         makeOffersIfNoneOutstanding()
 
       case StopDriver =>
@@ -102,26 +107,23 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
 
       case RemoteClientShutdown(transport, address) =>
         addressToExecutorId.get(address).foreach(removeExecutor(_, "remote Akka client shutdown"))
-
-      case MakeOffers =>
-        makeOffers()
-        outstandingResourceOffersMessage = false
+ 
+      case LaunchTasks(tasks) =>
+        launchTasks(tasks)
     }
 
     def makeOffersIfNoneOutstanding() {
-      if (!outstandingResourceOffersMessage) {
-        outstandingResourceOffersMessage = true
-        self ! MakeOffers
+      if (!outstandingResourceOffersMessage && somethingNew) {
+        somethingNew = false
+        val resourceOffers = executorHostPort.toArray.flatMap {
+          case (id, hostPort) => 
+            if (freeCores(id) > 0) Some(new WorkerOffer(id, hostPort, freeCores(id)))
+            else None }
+        if (resourceOffers.length > 0) {
+          outstandingResourceOffersMessage = true
+          scheduler.schedulerActor ! ResourceOffers(resourceOffers)
+        }
       }
-    }
-
-    // Make fake resource offers on all executors
-    def makeOffers() {
-      val resourceOffers = executorHostPort.toArray.flatMap {
-        case (id, hostPort) => 
-          if freeCores(id) > 0 Some(new WorkerOffer(id, hostPort, freeCores(id)))
-          else None }
-      launchTasks(scheduler.resourceOffers(resourceOffers))
     }
 
     // Launch tasks returned by a set of resource offers
@@ -130,6 +132,13 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
       for (task <- tasks.flatten) {
         numTasks += 1
         freeCores(task.executorId) -= 1
+      }
+      
+      outstandingResourceOffersMessage = false
+      // TODO eliminate some calls with an extra boolean here
+      makeOffersIfNoneOutstanding()
+
+      for (task <- tasks.flatten) {
         executorActor(task.executorId) ! LaunchTask(task)
       }
       logInfo("******LAUNCHED: " + numTasks)
