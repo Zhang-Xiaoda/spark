@@ -26,6 +26,7 @@ import java.util.Properties
  */
 private[spark] class ActiveJob(
     val runId: Int,
+    val submissionTime: Long,
     val finalStage: Stage,
     val func: (TaskContext, Iterator[_]) => _,
     val partitions: Array[Int],
@@ -36,4 +37,5 @@ private[spark] class ActiveJob(
   val numPartitions = partitions.length
   val finished = Array.fill[Boolean](numPartitions)(false)
   var numFinished = 0
+  var completionTime: Option[Long] = None
 }

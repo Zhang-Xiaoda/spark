@@ -29,9 +29,18 @@ import spark._
 import spark.executor.TaskMetrics
 import spark.scheduler.cluster.TaskInfo
 
-// Used to record runtime information for each job, including RDD graph 
-// tasks' start/stop shuffle information and information from outside
-
+/** Used to record runtime information for each job.
+  *
+  * Logged information includes the RDD dependency graph, submission and completion time for each
+  * stage and each job, the start and end time for each task, and shuffle metrics.
+  *
+  * To use this class, add the following lines to SparkContext:
+  *   private val jobLogger = new JobLogger()
+  *   addSparkListener(jobLogger)
+  * You can also add a JobLogger from within a Spark Shell:
+  *   val JobLogger = new JobLogger()
+  *   sc.addSparkListener(jobLogger)
+  */
 class JobLogger(val logDirName: String) extends SparkListener with Logging {
   private val logDir =  
     if (System.getenv("SPARK_LOG_DIR") != null)  
@@ -43,6 +52,8 @@ class JobLogger(val logDirName: String) extends SparkListener with Logging {
   private val jobIDToStages = new HashMap[Int, ListBuffer[Stage]]
   private val DATE_FORMAT = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss")
   private val eventQueue = new LinkedBlockingQueue[SparkListenerEvents]
+  
+  val invalidTime = -1
   
   createLogDir()
   def this() = this(String.valueOf(System.currentTimeMillis()))
@@ -68,8 +79,6 @@ class JobLogger(val logDirName: String) extends SparkListener with Logging {
             processStageCompletedEvent(stageInfo)
           case SparkListenerJobEnd(job, result) =>
             processJobEndEvent(job, result)
-          case SparkListenerTaskStart(task, taskInfo) =>
-            processTaskStartEvent(task, taskInfo)
           case SparkListenerTaskEnd(task, reason, taskInfo, taskMetrics) =>
             processTaskEndEvent(task, reason, taskInfo, taskMetrics)
           case _ =>
@@ -250,21 +259,15 @@ class JobLogger(val logDirName: String) extends SparkListener with Logging {
   }
 
   protected def processStageCompletedEvent(stageInfo: StageInfo) {
-    stageLogInfo(stageInfo.stage.id, "STAGE_ID=" + 
-                 stageInfo.stage.id + " STATUS=COMPLETED")
+    var info = "STAGE_ID=" + stageInfo.stage.id + " STATUS=COMPLETED SUBMISSION_TIME=" +
+      stageInfo.stage.submissionTime.getOrElse(invalidTime) + " COMPLETION_TIME=" +
+      stageInfo.stage.completionTime.getOrElse(invalidTime)
+    stageLogInfo(stageInfo.stage.id, info)
     
   }
 
   override def onTaskStart(taskStart: SparkListenerTaskStart) {
-    eventQueue.put(taskStart)
-  }
-
-  protected def processTaskStartEvent(task: Task[_], taskInfo: TaskInfo) {
-    var taskStatus = ""
-    task match {
-      case resultTask: ResultTask[_, _] => taskStatus = "TASK_TYPE=RESULT_TASK"
-      case shuffleMapTask: ShuffleMapTask => taskStatus = "TASK_TYPE=SHUFFLE_MAP_TASK"
-    }
+    // Do nothing; task information recorded upon task completion.
   }
 
   override def onTaskEnd(taskEnd: SparkListenerTaskEnd) {
@@ -309,9 +312,12 @@ class JobLogger(val logDirName: String) extends SparkListener with Logging {
       case JobFailed(exception, _) =>
         info += " STATUS=FAILED REASON="
         exception.getMessage.split("\\s+").foreach(info += _ + "_")
+        info = info.substring(0, info.length - 1)
       case _ =>
     }
-    jobLogInfo(job.runId, info.substring(0, info.length - 1).toUpperCase)
+    info += " SUBMISSION_TIME=" + job.submissionTime
+    info += " FINISH_TIME=" + job.completionTime.getOrElse(invalidTime)
+    jobLogInfo(job.runId, info.toUpperCase)
     closeLogWriter(job.runId)
   }
 

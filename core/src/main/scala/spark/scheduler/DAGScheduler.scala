@@ -323,7 +323,15 @@ class DAGScheduler(
       case JobSubmitted(finalRDD, func, partitions, allowLocal, callSite, listener, properties) =>
         val runId = nextRunId.getAndIncrement()
         val finalStage = newStage(finalRDD, None, runId, Some(callSite))
-        val job = new ActiveJob(runId, finalStage, func, partitions, callSite, listener, properties)
+        val job = new ActiveJob(
+          runId,
+          System.currentTimeMillis(),
+          finalStage,
+          func,
+          partitions,
+          callSite,
+          listener,
+          properties)
         clearCacheLocs()
         logInfo("Got job " + job.runId + " (" + callSite + ") with " + partitions.length +
                 " output partitions (allowLocal=" + allowLocal + ")")
@@ -577,6 +585,7 @@ class DAGScheduler(
                   job.numFinished += 1
                   // If the whole job has finished, remove it
                   if (job.numFinished == job.numPartitions) {
+                    job.completionTime = Some(System.currentTimeMillis())
                     idToActiveJob -= stage.priority
                     activeJobs -= job
                     resultStageToJob -= stage
