@@ -49,11 +49,6 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
     private val actorToExecutorId = new HashMap[ActorRef, String]
     private val addressToExecutorId = new HashMap[Address, String]
 
-    // True if there is currently an outstanding TODO 
-    private var outstandingResourceOffersMessage = false
-    // True if we should make a new offer
-    private var somethingNew = false
-
     override def preStart() {
       // Listen for remote client disconnection events, since they don't go through Akka's watch()
       context.system.eventStream.subscribe(self, classOf[RemoteClientLifeCycleEvent])
@@ -75,21 +70,18 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
           actorToExecutorId(sender) = executorId
           addressToExecutorId(sender.path.address) = executorId
           totalCoreCount.addAndGet(cores)
-          somethingNew = true
-          makeOffersIfNoneOutstanding()
+          makeOffers()
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
-        scheduler.schedulerActor ! CSStatusUpdate(taskId, state, data.value)
+        scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state)) {
           freeCores(executorId) += 1
-          somethingNew = true
-          makeOffersIfNoneOutstanding()
+          makeOffers(executorId)
         }
 
       case ReviveOffers =>
-        somethingNew = true
-        makeOffersIfNoneOutstanding()
+        makeOffers()
 
       case StopDriver =>
         sender ! true
@@ -110,38 +102,48 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
  
       case LaunchTasks(tasks) =>
         launchTasks(tasks)
+
+      case FreeCores(executorIdsToCores) =>
+        executorIdsToCores.foreach{ case(id, numCores) => freeCores(id) += numCores }
     }
 
-    def makeOffersIfNoneOutstanding() {
-      if (!outstandingResourceOffersMessage && somethingNew) {
-        somethingNew = false
-        val resourceOffers = executorHostPort.toArray.flatMap {
-          case (id, hostPort) => 
-            if (freeCores(id) > 0) Some(new WorkerOffer(id, hostPort, freeCores(id)))
-            else None }
-        if (resourceOffers.length > 0) {
-          outstandingResourceOffersMessage = true
-          scheduler.schedulerActor ! ResourceOffers(resourceOffers)
-        }
+    def makeOffers(executorId: String) {
+      scheduler.addResourceOffer(
+        new WorkerOffer(executorId, executorHostPort(executorId), freeCores(executorId)))
+      freeCores(executorId) = 0
+    }
+
+    def makeOffers() {
+      scheduler.addResourceOffers(executorHostPort.toArray.map {
+        case (id, hostPort) =>
+          // Mark the cores as "in use" while resource offers are being made to avoid offering the same cores to 2 jobs.
+          val numFreeCores = freeCores(id)
+          freeCores(id) = 0
+          new WorkerOffer(id, hostPort, numFreeCores)
+      })
+    }
+/*
+    def makeOffers() {
+      val resourceOffers = executorHostPort.toArray.flatMap {
+        case (id, hostPort) => 
+          if (freeCores(id) > 0) Some(new WorkerOffer(id, hostPort, freeCores(id)))
+          else None }
+      // TODO: do this with a foreach to have only one method, and see if it impacts throughout.
+      if (resourceOffers.length > 0) {
+        scheduler.addResourceOffers(resourceOffers)
       }
     }
+*/
 
     // Launch tasks returned by a set of resource offers
     def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
-      var numTasks = 0
+      // There are two windwos where an exec could have failed: before the resource offer was made (Which is bad)
+      // or after (in which case the task set already knows about the failure.  So we need to tell the TSM that the
+      // task set has failed, but its possible this will result in redundnat info.
       for (task <- tasks.flatten) {
-        numTasks += 1
-        freeCores(task.executorId) -= 1
-      }
-      
-      outstandingResourceOffersMessage = false
-      // TODO eliminate some calls with an extra boolean here
-      makeOffersIfNoneOutstanding()
-
-      for (task <- tasks.flatten) {
+        // TODO: handle the case where the executor died!
         executorActor(task.executorId) ! LaunchTask(task)
       }
-      logInfo("******LAUNCHED: " + numTasks)
     }
 
     // Remove a disconnected slave from the cluster

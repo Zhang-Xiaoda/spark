@@ -17,6 +17,8 @@
 
 package spark.scheduler.cluster
 
+import scala.collection.mutable.HashMap
+
 import spark.TaskState.TaskState
 import java.nio.ByteBuffer
 import spark.util.SerializableBuffer
@@ -55,7 +57,12 @@ object StatusUpdate {
 }
 
 // TS to d
-private[spark] case class LaunchTasks(tasks : Seq[Seq[TaskDescription]])  extends StandaloneClusterMessage
+private[spark]
+case class LaunchTasks(tasks : Seq[Seq[TaskDescription]])  extends StandaloneClusterMessage
+
+private[spark]
+case class FreeCores(executorIdsToCores: HashMap[String, Int]) extends StandaloneClusterMessage
+
 
 // Internal messages in driver
 private[spark] case object ReviveOffers extends StandaloneClusterMessage

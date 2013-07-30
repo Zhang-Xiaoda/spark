@@ -117,16 +117,20 @@ private[spark] class ClusterScheduler(val sc: SparkContext, val actorSystem: Act
   var schedulableBuilder: SchedulableBuilder = null
   var rootPool: Pool = null
 
-  var schedulerActor: ActorRef = null
+  // Stores resource offers that need to be processed.
+  private val resourceOffers = new ArrayBuffer[WorkerOffer]
 
-  class SchedulerActor() extends Actor {
-    def receive = {
-      case ResourceOffers(offers) =>
-        val tasks : Seq[Seq[TaskDescription]] = resourceOffers(offers)
-        sender ! LaunchTasks(tasks)
+  def addResourceOffer(offer: WorkerOffer) {
+    resourceOffers.synchronized {
+      resourceOffers.append(offer)
+      resourceOffers.notify()
+    }
+  }
 
-      case CSStatusUpdate(tid, state, serializedData) =>
-        statusUpdate(tid, state, serializedData)
+  def addResourceOffers(offers: Seq[WorkerOffer]) {
+    resourceOffers.synchronized {
+      offers.foreach(resourceOffers.append(_))
+      resourceOffers.notify()
     }
   }
 
@@ -204,8 +208,44 @@ private[spark] class ClusterScheduler(val sc: SparkContext, val actorSystem: Act
       }.start()
     }
 
-    schedulerActor = actorSystem.actorOf(
-      Props(new SchedulerActor()), name = "SchedulerActor")
+    // Start thread to process resource offers.
+    new Thread("ResourceOffers") {
+      setDaemon(true)
+      val schedulerBackendActor = actorSystem.actorFor(
+        "/user/%s".format(StandaloneSchedulerBackend.ACTOR_NAME))
+
+      override def run() {
+        var offersToProcess : ArrayBuffer[WorkerOffer] = null
+        while (true) {
+          /* Get some resource offers. This is done in a separate thread because processing
+           * offers takes some time, so we want to batch them if we get behind. */ 		
+          resourceOffers.synchronized {
+            while (resourceOffers.length == 0) {
+              resourceOffers.wait() 
+            }
+            offersToProcess = resourceOffers.clone()
+            resourceOffers.clear()
+            logInfo("%d offers; %d in should-be-empty".format(offersToProcess.length, resourceOffers.length))
+          }
+    
+          val tasks = makeResourceOffers(offersToProcess) 
+          logInfo("Attempting to launch %d tasks".format(tasks.flatten.length))
+          if (tasks.length > 0) {
+            schedulerBackendActor ! LaunchTasks(tasks)
+          }
+
+          // free cores from the executors that weren't used
+          val executorIdsToCores = new HashMap[String, Int] 
+          offersToProcess.foreach(offer => executorIdsToCores.put(
+            offer.executorId,
+            executorIdsToCores.getOrElse(offer.executorId, 0) + offer.cores))
+          tasks.flatten.foreach(task => executorIdsToCores.put(
+            task.executorId,
+            executorIdsToCores(task.executorId) - 1))
+          schedulerBackendActor ! FreeCores(executorIdsToCores)
+        }
+      }
+    }.start()
   }
 
   override def submitTasks(taskSet: TaskSet) {
@@ -250,7 +290,7 @@ private[spark] class ClusterScheduler(val sc: SparkContext, val actorSystem: Act
    * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
    * that tasks are balanced across the cluster.
    */
-  def resourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = {
+  def makeResourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = {
     synchronized {
       SparkEnv.set(sc.env)
       // Mark each slave as alive and remember its hostname
