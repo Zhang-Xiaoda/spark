@@ -56,10 +56,6 @@ object StatusUpdate {
   }
 }
 
-// TS to d
-private[spark]
-case class LaunchTasks(tasks : Seq[Seq[TaskDescription]])  extends StandaloneClusterMessage
-
 private[spark]
 case class FreeCores(executorIdsToCores: HashMap[String, Int]) extends StandaloneClusterMessage
 

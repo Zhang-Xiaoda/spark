@@ -231,7 +231,10 @@ private[spark] class ClusterScheduler(val sc: SparkContext, val actorSystem: Act
           val tasks = makeResourceOffers(offersToProcess) 
           logInfo("Attempting to launch %d tasks".format(tasks.flatten.length))
           if (tasks.length > 0) {
-            schedulerBackendActor ! LaunchTasks(tasks)
+            backend match {
+              case standaloneBackend: StandaloneSchedulerBackend => tasks.flatten.foreach(standaloneBackend.launchTask(_))
+              case _ => throw new ClassCastException
+            }
           }
 
           // free cores from the executors that weren't used

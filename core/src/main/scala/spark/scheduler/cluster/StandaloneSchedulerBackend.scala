@@ -27,6 +27,7 @@ import akka.util.Duration
 import spark.{Utils, SparkException, Logging, TaskState}
 import akka.dispatch.Await
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.LinkedBlockingQueue
 import akka.remote.{RemoteClientShutdown, RemoteClientDisconnected, RemoteClientLifeCycleEvent}
 
 /**
@@ -37,12 +38,14 @@ import akka.remote.{RemoteClientShutdown, RemoteClientDisconnected, RemoteClient
 private[spark]
 class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: ActorSystem)
   extends SchedulerBackend with Logging {
+  // All uses of executorActor must be synchronized, because task launch occurs in a separate
+  // thread and uses executorActor.
+  private val executorActor = new HashMap[String, ActorRef]
 
   // Use an atomic variable to track total number of cores in the cluster for simplicity and speed
   var totalCoreCount = new AtomicInteger(0)
 
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
-    private val executorActor = new HashMap[String, ActorRef]
     private val executorAddress = new HashMap[String, Address]
     private val executorHostPort = new HashMap[String, String]
     private val freeCores = new HashMap[String, Int]
@@ -57,20 +60,22 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
     def receive = {
       case RegisterExecutor(executorId, hostPort, cores) =>
         Utils.checkHostPort(hostPort, "Host port expected " + hostPort)
-        if (executorActor.contains(executorId)) {
-          sender ! RegisterExecutorFailed("Duplicate executor ID: " + executorId)
-        } else {
-          logInfo("Registered executor: " + sender + " with ID " + executorId)
-          sender ! RegisteredExecutor(sparkProperties)
-          context.watch(sender)
-          executorActor(executorId) = sender
-          executorHostPort(executorId) = hostPort
-          freeCores(executorId) = cores
-          executorAddress(executorId) = sender.path.address
-          actorToExecutorId(sender) = executorId
-          addressToExecutorId(sender.path.address) = executorId
-          totalCoreCount.addAndGet(cores)
-          makeOffers()
+        executorActor.synchronized {
+          if (executorActor.contains(executorId)) {
+            sender ! RegisterExecutorFailed("Duplicate executor ID: " + executorId)
+          } else {
+            logInfo("Registered executor: " + sender + " with ID " + executorId)
+            sender ! RegisteredExecutor(sparkProperties)
+            context.watch(sender)
+            executorActor(executorId) = sender
+            executorHostPort(executorId) = hostPort
+            freeCores(executorId) = cores
+            executorAddress(executorId) = sender.path.address
+            actorToExecutorId(sender) = executorId
+            addressToExecutorId(sender.path.address) = executorId
+            totalCoreCount.addAndGet(cores)
+            makeOffers()
+          }
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
@@ -99,9 +104,6 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
 
       case RemoteClientShutdown(transport, address) =>
         addressToExecutorId.get(address).foreach(removeExecutor(_, "remote Akka client shutdown"))
- 
-      case LaunchTasks(tasks) =>
-        launchTasks(tasks)
 
       case FreeCores(executorIdsToCores) =>
         executorIdsToCores.foreach{ case(id, numCores) => freeCores(id) += numCores }
@@ -135,36 +137,33 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
     }
 */
 
-    // Launch tasks returned by a set of resource offers
-    def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
-      // There are two windwos where an exec could have failed: before the resource offer was made (Which is bad)
-      // or after (in which case the task set already knows about the failure.  So we need to tell the TSM that the
-      // task set has failed, but its possible this will result in redundnat info.
-      for (task <- tasks.flatten) {
-        // TODO: handle the case where the executor died!
-        executorActor(task.executorId) ! LaunchTask(task)
-      }
-    }
-
     // Remove a disconnected slave from the cluster
     def removeExecutor(executorId: String, reason: String) {
-      if (executorActor.contains(executorId)) {
-        logInfo("Executor " + executorId + " disconnected, so removing it")
-        val numCores = freeCores(executorId)
-        actorToExecutorId -= executorActor(executorId)
-        addressToExecutorId -= executorAddress(executorId)
-        executorActor -= executorId
-        executorHostPort -= executorId
-        freeCores -= executorId
-        executorHostPort -= executorId
-        totalCoreCount.addAndGet(-numCores)
-        scheduler.executorLost(executorId, SlaveLost(reason))
+      executorActor.synchronized {
+        if (executorActor.contains(executorId)) {
+          logInfo("Executor " + executorId + " disconnected, so removing it")
+          val numCores = freeCores(executorId)
+          actorToExecutorId -= executorActor(executorId)
+          addressToExecutorId -= executorAddress(executorId)
+          executorActor -= executorId
+          executorHostPort -= executorId
+          freeCores -= executorId
+          executorHostPort -= executorId
+          totalCoreCount.addAndGet(-numCores)
+          scheduler.executorLost(executorId, SlaveLost(reason))
+        }
       }
     }
   }
 
   var driverActor: ActorRef = null
   val taskIdsOnSlave = new HashMap[String, HashSet[String]]
+
+  val tasksToLaunch = new LinkedBlockingQueue[TaskDescription]
+
+  def launchTask(task: TaskDescription) {
+    tasksToLaunch.put(task)
+  }
 
   override def start() {
     val properties = new ArrayBuffer[(String, String)]
@@ -178,6 +177,30 @@ class StandaloneSchedulerBackend(scheduler: ClusterScheduler, actorSystem: Actor
     }
     driverActor = actorSystem.actorOf(
       Props(new DriverActor(properties)), name = StandaloneSchedulerBackend.ACTOR_NAME)
+
+    // Start thread to launch tasks.
+    new Thread("Task Launching") {
+      setDaemon(true)
+ 
+      override def run() {
+        var task : TaskDescription = null
+        while (true) {
+          try {
+            task = tasksToLaunch.take()
+            executorActor.synchronized {
+              // TODO: handle failures
+              executorActor(task.executorId) ! LaunchTask(task)
+            }
+          } catch {
+            case interruptedException: InterruptedException =>
+              logError(
+                "Interruped while waiting for task to launch: %s".format(interruptedException))
+            case e: Exception =>
+              logError(e.getMessage())
+          }
+        } 
+      }
+    }.start() 
   }
 
   private val timeout = Duration.create(System.getProperty("spark.akka.askTimeout", "10").toLong, "seconds")
