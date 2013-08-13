@@ -59,9 +59,9 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
    * then others. But once all available node local (and no pref) tasks are scheduled, instead of
    * waiting for 3 sec before scheduling to other nodes (which degrades performance for time
    * sensitive tasks and on larger clusters), we can modulate that: to also allow rack local nodes
-   * or any node. The default is still set to HOST - so that previous behavior is maintained. This
-   * is to allow tuning the tension between pulling rdd data off node and scheduling computation
-   * asap.
+   * or any node. The default is still set to NODE_LOCAL - so that previous behavior is maintained.
+   * This is to allow tuning the tension between pulling rdd data off node and scheduling
+   * computation asap.
    *
    * TODO: rename property ? The value is one of
    * - NODE_LOCAL (default, no change w.r.t current behavior),
