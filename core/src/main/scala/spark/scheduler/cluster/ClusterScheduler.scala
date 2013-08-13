@@ -44,34 +44,41 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
   // Threshold above which we warn user initial TaskSet may be starved
   val STARVATION_TIMEOUT = System.getProperty("spark.starvation.timeout", "15000").toLong
   // How often to revive offers in case there are pending tasks - that is how often to try to get
-  // tasks scheduled in case there are nodes available : default 0 is to disable it - to preserve existing behavior
+  // tasks scheduled in case there are nodes available : default 0 is to disable it - to preserve
+  // existing behavior
   // Note that this is required due to delayed scheduling due to data locality waits, etc.
   // TODO: rename property ?
   val TASK_REVIVAL_INTERVAL = System.getProperty("spark.tasks.revive.interval", "0").toLong
 
-  /*
-   This property controls how aggressive we should be to modulate waiting for node local task scheduling.
-   To elaborate, currently there is a time limit (3 sec def) to ensure that spark attempts to wait for node locality of tasks before
-   scheduling on other nodes. We have modified this in yarn branch such that offers to task set happen in prioritized order :
-   node-local, rack-local and then others
-   But once all available node local (and no pref) tasks are scheduled, instead of waiting for 3 sec before
-   scheduling to other nodes (which degrades performance for time sensitive tasks and on larger clusters), we can
-   modulate that : to also allow rack local nodes or any node. The default is still set to HOST - so that previous behavior is
-   maintained. This is to allow tuning the tension between pulling rdd data off node and scheduling computation asap.
-
-   TODO: rename property ? The value is one of
-   - NODE_LOCAL (default, no change w.r.t current behavior),
-   - RACK_LOCAL and
-   - ANY
-
-   Note that this property makes more sense when used in conjugation with spark.tasks.revive.interval > 0 : else it is not very effective.
-
-   Additional Note: For non trivial clusters, there is a 4x - 5x reduction in running time (in some of our experiments) based on whether
-   it is left at default NODE_LOCAL, RACK_LOCAL (if cluster is configured to be rack aware) or ANY.
-   If cluster is rack aware, then setting it to RACK_LOCAL gives best tradeoff and a 3x - 4x performance improvement while minimizing IO impact.
-   Also, it brings down the variance in running time drastically.
-    */
-  val TASK_SCHEDULING_AGGRESSION = TaskLocality.parse(System.getProperty("spark.tasks.schedule.aggression", "NODE_LOCAL"))
+  /**
+   * Controls how aggressive we should be to modulate waiting for node local task scheduling.
+   *
+   * To elaborate, currently there is a time limit (3 sec def) to ensure that spark attempts to wait
+   * for node locality of tasks before scheduling on other nodes. We have modified this in yarn
+   * branch such that offers to task set happen in prioritized order: node-local, rack-local and
+   * then others. But once all available node local (and no pref) tasks are scheduled, instead of
+   * waiting for 3 sec before scheduling to other nodes (which degrades performance for time
+   * sensitive tasks and on larger clusters), we can modulate that: to also allow rack local nodes
+   * or any node. The default is still set to HOST - so that previous behavior is maintained. This
+   * is to allow tuning the tension between pulling rdd data off node and scheduling computation
+   * asap.
+   *
+   * TODO: rename property ? The value is one of
+   * - NODE_LOCAL (default, no change w.r.t current behavior),
+   * - RACK_LOCAL and
+   * - ANY
+   *
+   * Note that this property makes more sense when used in conjugation with
+   * spark.tasks.revive.interval > 0 : else it is not very effective.
+   *
+   * Additional Note: For non trivial clusters, there is a 4x - 5x reduction in running time (in
+   * some of our experiments) based on whether it is left at default NODE_LOCAL, RACK_LOCAL (if
+   * cluster is configured to be rack aware) or ANY. If cluster is rack aware, then setting it to
+   * RACK_LOCAL gives best tradeoff and a 3x - 4x performance improvement while minimizing IO impact.
+   * Also, it brings down the variance in running time drastically.
+   */
+  val TASK_SCHEDULING_AGGRESSION = TaskLocality.parse(System.getProperty(
+    "spark.tasks.schedule.aggression", "NODE_LOCAL"))
 
   val activeTaskSets = new HashMap[String, TaskSetManager]
 
@@ -90,7 +97,8 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
   val activeExecutorIds = new HashSet[String]
 
   // TODO: We might want to remove this and merge it with execId datastructures - but later.
-  // Which hosts in the cluster are alive (contains hostPort's) - used for process local and node local task locality.
+  // Which hosts in the cluster are alive (contains hostPort's) - used for process local and node
+  // local task locality.
   private val hostPortsAlive = new HashSet[String]
   private val hostToAliveHostPorts = new HashMap[String, HashSet[String]]
 
@@ -249,7 +257,8 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
         }
 
         hostPortsAlive += o.hostPort
-        hostToAliveHostPorts.getOrElseUpdate(Utils.parseHostPort(o.hostPort)._1, new HashSet[String]).add(o.hostPort)
+        hostToAliveHostPorts.getOrElseUpdate(
+          Utils.parseHostPort(o.hostPort)._1, new HashSet[String]).add(o.hostPort)
         executorGained(o.executorId, o.hostPort)
       }
       // Build a list of tasks to assign to each slave
@@ -292,24 +301,29 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
           // DEBUG code
           Utils.checkHostPort(hostPort)
 
-          val numProcessLocalTasks =  math.max(0, math.min(manager.numPendingTasksForHostPort(hostPort), availableCpus(i)))
+          val numProcessLocalTasks = math.min(
+            manager.numPendingTasksForHostPort(hostPort), availableCpus(i)))
           if (numProcessLocalTasks > 0){
             val list = processLocalOffers.getOrElseUpdate(hostPort, new ArrayBuffer[Int])
             for (j <- 0 until numProcessLocalTasks) list += i
           }
 
           val host = Utils.parseHostPort(hostPort)._1
-          val numNodeLocalTasks =  math.max(0,
-            // Remove process local tasks (which are also host local btw !) from this
-            math.min(manager.numPendingTasksForHost(hostPort) - numProcessLocalTasks, nodeToAvailableCpus(host)))
+          // Remove process local tasks (which are also host local btw !) from this
+          val pendingNodeLocalTasks = math.max(
+            0, manager.numPendingTasksForHost(hostPort) - numProcessLocalTasks)
+          val numNodeLocalTasks =  math.min(pendingNodeLocalTasks, nodeToAvailableCpus(host)))
           if (numNodeLocalTasks > 0){
             val list = nodeLocalOffers.getOrElseUpdate(host, new ArrayBuffer[Int])
             for (j <- 0 until numNodeLocalTasks) list += i
           }
 
-          val numRackLocalTasks =  math.max(0,
-            // Remove node local tasks (which are also rack local btw !) from this
-            math.min(manager.numRackLocalPendingTasksForHost(hostPort) - numProcessLocalTasks - numNodeLocalTasks, nodeToAvailableCpus(host)))
+          // Remove node local tasks (which are also rack local btw !) from this
+          val pendingRackLocalTasks = math.max(
+            0,
+            manager.numRackLocalPendingTasksForHost(hostPort) - numProcessLocalTasks -
+            numNodeLocalTasks)
+          val numRackLocalTasks = math.min(pendingRackLocalTasks, nodeToAvailableCpus(host))
           if (numRackLocalTasks > 0){
             val list = rackLocalOffers.getOrElseUpdate(host, new ArrayBuffer[Int])
             for (j <- 0 until numRackLocalTasks) list += i
@@ -357,10 +371,15 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
             val execId = offers(i).executorId
             val hostPort = offers(i).hostPort
 
-            // If last loop and within the lastLoopIndex, expand scope - else use null (which will use default/existing)
-            val overrideLocality = if (lastLoop && loopCount < lastLoopIndex) TASK_SCHEDULING_AGGRESSION else null
+            // If last loop and within the lastLoopIndex, expand scope - else use null (which will
+            // use default/existing)
+            val overrideLocality = if (lastLoop && loopCount < lastLoopIndex)
+              TASK_SCHEDULING_AGGRESSION
+            else
+              null
 
-            // If last loop, override waiting for host locality - we scheduled all local tasks already and there might be more available ...
+            // If last loop, override waiting for host locality - we scheduled all local tasks
+            // already and there might be more available ...
             loopCount += 1
 
             manager.slaveOffer(execId, hostPort, availableCpus(i), overrideLocality) match {
@@ -378,9 +397,10 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
               case None => {}
               }
             }
-          // Loop once more - when lastLoop = true, then we try to schedule task on all nodes irrespective of
-          // data locality (we still go in order of priority : but that would not change anything since
-          // if data local tasks had been available, we would have scheduled them already)
+          // Loop once more - when lastLoop = true, then we try to schedule task on all nodes
+          // irrespective of data locality (we still go in order of priority : but that would not
+          // change anything since if data local tasks had been available, we would have scheduled
+          // them already)
           if (lastLoop) {
             // prevent more looping
             launchedTask = false
@@ -542,7 +562,8 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
       Utils.checkHostPort(hostPort)
 
       hostPortsAlive -= hostPort
-      hostToAliveHostPorts.getOrElseUpdate(Utils.parseHostPort(hostPort)._1, new HashSet[String]).remove(hostPort)
+      hostToAliveHostPorts.getOrElseUpdate(
+        Utils.parseHostPort(hostPort)._1, new HashSet[String]).remove(hostPort)
     }
 
     val execs = executorsByHostPort.getOrElse(hostPort, new HashSet)
@@ -586,24 +607,17 @@ private[spark] class ClusterScheduler(val sc: SparkContext)
 
 object ClusterScheduler {
 
-  // Used to 'spray' available containers across the available set to ensure too many containers on same host
-  // are not used up. Used in yarn mode and in task scheduling (when there are multiple containers available
-  // to execute a task)
-  // For example: yarn can returns more containers than we would have requested under ANY, this method
-  // prioritizes how to use the allocated containers.
-  // flatten the map such that the array buffer entries are spread out across the returned value.
-  // given <host, list[container]> == <h1, [c1 .. c5]>, <h2, [c1 .. c3]>, <h3, [c1, c2]>, <h4, c1>, <h5, c1>, i
-  // the return value would be something like : h1c1, h2c1, h3c1, h4c1, h5c1, h1c2, h2c2, h3c2, h1c3, h2c3, h1c4, h1c5
-  // We then 'use' the containers in this order (consuming only the top K from this list where
-  // K = number to be user). This is to ensure that if we have multiple eligible allocations,
-  // they dont end up allocating all containers on a small number of hosts - increasing probability of
-  // multiple container failure when a host goes down.
-  // Note, there is bias for keys with higher number of entries in value to be picked first (by design)
-  // Also note that invocation of this method is expected to have containers of same 'type'
-  // (host-local, rack-local, off-rack) and not across types : so that reordering is simply better from
-  // the available list - everything else being same.
-  // That is, we we first consume data local, then rack local and finally off rack nodes. So the
-  // prioritization from this method applies to within each category
+  /**
+   * Used to balance containers across hosts.
+   *
+   * Accepts a map of hosts to resource offers for that host, and returns a prioritized list of
+   * resource offers representing the order in which the offers should be used.  The resource
+   * offers are ordered such that we'll allocate one container on each host before allocating a
+   * second container on any host, and so on, in order to reduce the damage if a host fails.
+   *
+   * For example, given <h1, [o1, o2, o3]>, <h2, [o4]>, <h1, [o5, o6]>, returns
+   * [o1, o5, o4, 02, o6, o3]
+   */
   def prioritizeContainers[K, T] (map: HashMap[K, ArrayBuffer[T]]): List[T] = {
     val _keyList = new ArrayBuffer[K](map.size)
     _keyList ++= map.keys
