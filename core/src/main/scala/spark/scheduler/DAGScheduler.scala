@@ -281,7 +281,7 @@ class DAGScheduler(
     val waiter = new JobWaiter(partitions.size, resultHandler)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     val toSubmit = JobSubmitted(finalRdd, func2, partitions.toArray, allowLocal, callSite, waiter,
-      properties)
+      new Properties(properties))
     (toSubmit, waiter)
   }
 
@@ -329,7 +329,7 @@ class DAGScheduler(
     val listener = new ApproximateActionListener(rdd, func, evaluator, timeout)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     val partitions = (0 until rdd.partitions.size).toArray
-    eventQueue.put(JobSubmitted(rdd, func2, partitions, allowLocal = false, callSite, listener, properties))
+    eventQueue.put(JobSubmitted(rdd, func2, partitions, allowLocal = false, callSite, listener, new Properties(properties)))
     listener.awaitResult()    // Will throw an exception if the job fails
   }
 

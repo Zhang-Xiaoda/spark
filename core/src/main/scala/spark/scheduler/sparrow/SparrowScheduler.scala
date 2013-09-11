@@ -75,7 +75,7 @@ private[spark] class SparrowScheduler(
       } else {
         val sparkJobDescription = taskSet.properties.getProperty(
           SparkContext.SPARK_JOB_DESCRIPTION, "").replace("\n", " ")
-        "%s-%s".format(sparkJobDescription, taskSet.stageId)
+        "%s-%s-%s".format(sparkJobDescription, taskSet.stageId, taskSet.priority)
       }
     }
 
