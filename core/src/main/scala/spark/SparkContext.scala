@@ -285,6 +285,7 @@ class SparkContext(
 
   /** Set a human readable description of the current job. */
   def setJobDescription(value: String) {
+    println("Setting job description %s".format(value))
     setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, value)
   }
 
@@ -715,7 +716,6 @@ class SparkContext(
     val copy = new Properties()
     properties.stringPropertyNames.foreach(name => copy.setProperty(name, properties.getProperty(name)))
     logInfo("Job description %s".format(properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, "")))
-    println("Setting job description %s".format(properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, "")))
     return copy
   }
 
