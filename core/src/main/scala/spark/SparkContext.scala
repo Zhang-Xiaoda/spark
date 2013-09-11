@@ -733,7 +733,7 @@ class SparkContext(
       allowLocal: Boolean,
       resultHandler: (Int, U) => Unit) {
     val callSite = Utils.formatSparkCallSite
-    println("Starting job: " + callSite + " with description " + localProperties.value.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, ""))
+    println("THREAD " + Thread.currentThread.getName + " Starting job: " + callSite + " with description " + localProperties.value.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, ""))
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
     val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler,
