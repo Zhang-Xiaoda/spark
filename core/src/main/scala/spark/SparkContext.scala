@@ -286,7 +286,7 @@ class SparkContext(
   /** Set a human readable description of the current job. */
   def setJobDescription(value: String) {
     val noNew = value.replace("\n", " ")
-    println("Setting job description %s".format(noNew))
+    println("%s: Setting job description %s".format(Thread.currentThread.getName, noNew))
     setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, noNew)
   }
 
