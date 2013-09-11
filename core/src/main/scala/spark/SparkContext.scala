@@ -715,6 +715,7 @@ class SparkContext(
     val copy = new Properties()
     properties.stringPropertyNames.foreach(name => copy.setProperty(name, properties.getProperty(name)))
     logInfo("Job description %s".format(properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, "")))
+    println("Setting job description %s".format(properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, "")))
     return copy
   }
 
@@ -731,6 +732,7 @@ class SparkContext(
       allowLocal: Boolean,
       resultHandler: (Int, U) => Unit) {
     val callSite = Utils.formatSparkCallSite
+    println("Starting job: " + callSite + " with description " + localProperties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, ""))
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
     val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler,
