@@ -711,6 +711,12 @@ class SparkContext(
     }
   }
 
+  private def deepCopyProperties(properties: Properties): Properties = {
+    val copy = new Properties()
+    properties.propertyNames.foreach(name => copy.setProperty(name, properties.getProperty(name)))
+    return copy
+  }
+
   /**
    * Run a function on a given set of partitions in an RDD and pass the results to the given
    * handler function. This is the main entry point for all actions in Spark. The allowLocal
@@ -726,7 +732,8 @@ class SparkContext(
     val callSite = Utils.formatSparkCallSite
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
-    val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler, localProperties.value)
+    val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler,
+      deepCopyProperties(localProperties.value))
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
     rdd.doCheckpoint()
     result
