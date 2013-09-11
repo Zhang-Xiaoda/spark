@@ -285,8 +285,9 @@ class SparkContext(
 
   /** Set a human readable description of the current job. */
   def setJobDescription(value: String) {
-    println("Setting job description %s".format(value))
-    setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, value)
+    val noNew = value.replace("\n", " ")
+    println("Setting job description %s".format(noNew))
+    setLocalProperty(SparkContext.SPARK_JOB_DESCRIPTION, noNew)
   }
 
   // Post init
