@@ -27,7 +27,6 @@ import scala.collection.generic.Growable
 import scala.collection.JavaConversions._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
-import scala.util.DynamicVariable
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
@@ -266,20 +265,20 @@ class SparkContext(
   private[spark] var checkpointDir: Option[String] = None
 
   // Thread Local variable that can be used by users to pass information down the stack
-  private val localProperties = new DynamicVariable[Properties](null)
+  private val localProperties = new ThreadLocal[Properties]
 
   def initLocalProperties() {
-      localProperties.value = new Properties()
+      localProperties.set(new Properties())
   }
 
   def setLocalProperty(key: String, value: String) {
-    if (localProperties.value == null) {
-      localProperties.value = new Properties()
+    if (localProperties.get() == null) {
+      localProperties.set(new Properties())
     }
     if (value == null) {
-      localProperties.value.remove(key)
+      localProperties.get().remove(key)
     } else {
-      localProperties.value.setProperty(key, value)
+      localProperties.get().setProperty(key, value)
     }
   }
 
