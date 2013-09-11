@@ -713,7 +713,8 @@ class SparkContext(
 
   private def deepCopyProperties(properties: Properties): Properties = {
     val copy = new Properties()
-    properties.propertyNames.foreach(name => copy.setProperty(name, properties.getProperty(name)))
+    properties.stringPropertyNames.foreach(name => copy.setProperty(name, properties.getProperty(name)))
+    logInfo("Job description %s".format(properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, "")))
     return copy
   }
 
@@ -733,7 +734,8 @@ class SparkContext(
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
     val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler,
-      deepCopyProperties(localProperties.value))
+      localProperties.value)
+    //  deepCopyProperties(localProperties.value))
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
     rdd.doCheckpoint()
     result
