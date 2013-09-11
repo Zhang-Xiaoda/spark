@@ -535,6 +535,7 @@ class DAGScheduler(
     // must be run listener before possible NotSerializableException
     // should be "StageSubmitted" first and then "JobEnded"
     val properties = idToActiveJob(stage.jobId).properties
+    val description = idToActiveJob(stage.jobId).description
     listenerBus.post(SparkListenerStageSubmitted(stage, tasks.size, properties))
 
     if (tasks.size > 0) {
@@ -555,7 +556,7 @@ class DAGScheduler(
       myPending ++= tasks
       logDebug("New pending tasks: " + myPending)
       taskSched.submitTasks(
-        new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.jobId, properties))
+        new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.jobId, properties, description))
       if (!stage.submissionTime.isDefined) {
         stage.submissionTime = Some(System.currentTimeMillis())
       }
