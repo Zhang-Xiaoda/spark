@@ -31,7 +31,8 @@ private[spark] class ActiveJob(
     val partitions: Array[Int],
     val callSite: String,
     val listener: JobListener,
-    val properties: Properties) {
+    val properties: Properties,
+    val description: String = "") {
 
   val numPartitions = partitions.length
   val finished = Array.fill[Boolean](numPartitions)(false)

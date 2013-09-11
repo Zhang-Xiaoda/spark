@@ -344,7 +344,8 @@ class DAGScheduler(
         val finalStage = newStage(finalRDD, None, jobId, Some(callSite))
         System.out.println("Description of job %s with final stage %s: %s".format(
           jobId, finalStage.id, properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, "")))
-        val job = new ActiveJob(jobId, finalStage, func, partitions, callSite, listener, properties)
+        val job = new ActiveJob(jobId, finalStage, func, partitions, callSite, listener, properties,
+          properties.getProperty(SparkContext.SPARK_JOB_DESCRIPTION))
         clearCacheLocs()
         logInfo("Got job " + job.jobId + " (" + callSite + ") with " + partitions.length +
                 " output partitions (allowLocal=" + allowLocal + ")")
