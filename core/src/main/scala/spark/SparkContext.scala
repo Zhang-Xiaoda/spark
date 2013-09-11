@@ -273,6 +273,7 @@ class SparkContext(
 
   def setLocalProperty(key: String, value: String) {
     if (localProperties.get() == null) {
+      println("Initializing proerties!")
       localProperties.set(new Properties())
     }
     if (value == null) {
@@ -732,11 +733,11 @@ class SparkContext(
       allowLocal: Boolean,
       resultHandler: (Int, U) => Unit) {
     val callSite = Utils.formatSparkCallSite
-    println("THREAD " + Thread.currentThread.getName + " Starting job: " + callSite + " with description " + localProperties.value.getProperty(SparkContext.SPARK_JOB_DESCRIPTION, ""))
+    println("THREAD " + Thread.currentThread.getName + " Starting job: " + callSite + " with description " + localProperties.get().getProperty(SparkContext.SPARK_JOB_DESCRIPTION, ""))
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
     val result = dagScheduler.runJob(rdd, func, partitions, callSite, allowLocal, resultHandler,
-      localProperties.value)
+      localProperties.get())
     //  deepCopyProperties(localProperties.value))
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
     rdd.doCheckpoint()
@@ -820,7 +821,7 @@ class SparkContext(
     val callSite = Utils.formatSparkCallSite
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
-    val result = dagScheduler.runApproximateJob(rdd, func, evaluator, callSite, timeout, localProperties.value)
+    val result = dagScheduler.runApproximateJob(rdd, func, evaluator, callSite, timeout, localProperties.get())
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
     result
   }
